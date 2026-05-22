@@ -1,0 +1,9 @@
+fastapi~=0.136.1
+uvicorn
+sqlalchemy~=2.0.49
+psycopg2-binary
+pgvector
+sentence-transformers
+python-dotenv~=1.2.2
+pydantic~=2.13.4
+requests
