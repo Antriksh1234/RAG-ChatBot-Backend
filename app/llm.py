@@ -4,9 +4,17 @@ import requests
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
 def generate_answer(context: str, question: str):
-
     prompt = f"""
-    Answer the question based only on the provided context.
+    You are a precise AI assistant.
+
+    Answer ONLY using the provided context.
+
+    Do not make up information.
+    Do not calculate ages unless explicitly stated in the context.
+    Do not modify dates or names.
+    If information is not clearly available, say so.
+
+    Keep answers concise and factual.
 
     Context:
     {context}

@@ -4,16 +4,12 @@ from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import engine, SessionLocal
-from app.models import Document, Base
 from app.embeddings import generate_embedding
-from app.schemas import DocumentCreate
+from app.schemas import DocumentCreate, SearchRequest, DocumentUpdate
 from app.llm import generate_answer
 
 from app.models import Document, DocumentChunk, Base
 from app.utils import chunk_text
-
-from app.schemas import DocumentCreate, SearchRequest
-from sqlalchemy import select
 
 Base.metadata.create_all(bind=engine)
 
@@ -26,6 +22,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def create_document_chunks(
+    db: Session,
+    document: Document
+):
+
+    chunks = chunk_text(document.content)
+
+    for index, chunk in enumerate(chunks):
+
+        embedding = generate_embedding(chunk)
+
+        document_chunk = DocumentChunk(
+            document_id=document.id,
+            chunk_index=index,
+            chunk_text=chunk,
+            embedding=embedding
+        )
+
+        db.add(document_chunk)
+
+    db.commit()
+
+    return len(chunks)
 
 
 @app.get("/")
@@ -49,26 +69,15 @@ def create_document(document: DocumentCreate):
 
     db.refresh(db_document)
 
-    chunks = chunk_text(document.content)
-
-    for index, chunk in enumerate(chunks):
-        embedding = generate_embedding(chunk)
-
-        db_chunk = DocumentChunk(
-            document_id=db_document.id,
-            chunk_index=index,
-            chunk_text=chunk,
-            embedding=embedding
-        )
-
-        db.add(db_chunk)
-
-    db.commit()
+    length = create_document_chunks(
+        db=db,
+        document=db_document
+    )
 
     return {
         "id": str(db_document.id),
         "message": "Document created successfully",
-        "chunks_created": len(chunks)
+        "chunks_created": length
     }
 
 
@@ -103,13 +112,35 @@ def chat(request: SearchRequest):
         DocumentChunk.embedding.cosine_distance(
             query_embedding
         ).label("distance")
-    ).order_by("distance").limit(3).all()
+    ).order_by("distance").limit(5).all()
 
     DISTANCE_THRESHOLD = 0.7
 
-    best_distance = results[0].distance
+    filtered_results = [
+        result
+        for result in results
+        if result.distance < DISTANCE_THRESHOLD
+    ]
 
-    if best_distance > DISTANCE_THRESHOLD:
+    print("\n--- RETRIEVAL RESULTS ---")
+
+    for result in filtered_results:
+
+        print(
+            f"""
+Document: {result.DocumentChunk.document.title}
+
+Distance: {result.distance}
+
+Chunk Preview:
+{result.DocumentChunk.chunk_text[:200]}
+"""
+        )
+
+    print("--- END RETRIEVAL RESULTS ---\n")
+
+    if not filtered_results:
+
         return {
             "question": request.query,
             "answer": "I could not find relevant information in the uploaded documents.",
@@ -117,7 +148,10 @@ def chat(request: SearchRequest):
         }
 
     context = "\n\n".join(
-        [result.DocumentChunk.chunk_text for result in results]
+        [
+            result.DocumentChunk.chunk_text
+            for result in filtered_results
+        ]
     )
 
     llm_response = generate_answer(
@@ -127,7 +161,7 @@ def chat(request: SearchRequest):
 
     unique_sources = {}
 
-    for result in results:
+    for result in filtered_results:
 
         doc_id = str(result.DocumentChunk.document.id)
 
@@ -139,6 +173,7 @@ def chat(request: SearchRequest):
             }
 
     return {
+
         "question": request.query,
 
         "answer": (
@@ -171,4 +206,64 @@ def get_document(document_id: str):
         "title": document.title,
         "content": document.content,
         "created_at": document.created_at
+    }
+
+@app.get("/documents")
+def get_documents():
+
+    db: Session = SessionLocal()
+
+    documents = db.query(Document).order_by(
+        Document.created_at.desc()
+    ).all()
+
+    return [
+        {
+            "id": str(document.id),
+            "title": document.title,
+            "created_at": document.created_at
+        }
+        for document in documents
+    ]
+
+
+@app.put("/documents/{document_id}")
+def update_document(
+    document_id: str,
+    updated_document: DocumentUpdate
+):
+
+    db: Session = SessionLocal()
+
+    document_uuid = uuid.UUID(document_id)
+
+    document = db.query(Document).filter(
+        Document.id == document_uuid
+    ).first()
+
+    if not document:
+        return {
+            "error": "Document not found"
+        }
+
+    document.title = updated_document.title
+    document.content = updated_document.content
+
+    db.commit()
+
+    db.query(DocumentChunk).filter(
+        DocumentChunk.document_id == document.id
+    ).delete()
+
+    db.commit()
+
+    chunks_created = create_document_chunks(
+        db=db,
+        document=document
+    )
+
+    return {
+        "message": "Document updated successfully",
+        "document_id": str(document.id),
+        "chunks_created": chunks_created
     }

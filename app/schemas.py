@@ -5,5 +5,9 @@ class DocumentCreate(BaseModel):
     title: str
     content: str
 
+class DocumentUpdate(BaseModel):
+    title: str
+    content: str
+
 class SearchRequest(BaseModel):
     query: str
