@@ -51,7 +51,7 @@ Implemented concepts include:
 - Sentence Transformers
 - Groq API
 
-## Frontend
+## Frontend (Different Repo)
 - Next.js
 - React
 - Tailwind CSS
