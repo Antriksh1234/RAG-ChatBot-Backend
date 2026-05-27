@@ -17,3 +17,4 @@ class ChatMessage(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     history: List[ChatMessage] = []
+    summary: str = ""

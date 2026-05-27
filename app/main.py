@@ -1,12 +1,16 @@
 import uuid
+import re
+import json
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
+from app.summarizer import summarize_conversation
 
 from app.db import engine, SessionLocal
 from app.embeddings import generate_embedding
 from app.schemas import DocumentCreate, SearchRequest, DocumentUpdate
-from app.llm import generate_answer
+from app.llm import generate_answer, stream_answer
 from app.query_rewriter import rewrite_query
 
 from app.models import Document, DocumentChunk, Base
@@ -22,6 +26,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Sources"]
 )
 
 def create_document_chunks(
@@ -117,15 +122,32 @@ def chat(request: SearchRequest):
 
     db: Session = SessionLocal()
 
+    conversation_summary = ""
+
+    history_messages = [
+        {
+            "role": message.role,
+            "content": message.content
+        }
+        for message in request.history
+    ]
+
+    if len(history_messages) > 10:
+        print("\n--- MEMORY OPTIMIZATION ---")
+        print("Conversation exceeded threshold.")
+        print(f"Original History Length: {len(history_messages)}")
+        older_messages = history_messages[:-6]
+
+        conversation_summary = summarize_conversation(
+            older_messages
+        )
+
+        history_messages = history_messages[-6:]
+
     rewritten_query = rewrite_query(
-        history=[
-            {
-                "role": message.role,
-                "content": message.content
-            }
-            for message in request.history
-        ],
-        current_question=request.query
+        history=history_messages,
+        current_question=request.query,
+        summary=conversation_summary
     )
 
     query_embedding = generate_embedding(rewritten_query)
@@ -150,41 +172,73 @@ def chat(request: SearchRequest):
         if result.distance < DISTANCE_THRESHOLD
     ]
 
+    query_words = set(
+        re.findall(
+            r"\w+",
+            rewritten_query.lower()
+        )
+    )
+
+    def keyword_score(chunk_text):
+
+        chunk_words = set(
+            re.findall(
+                r"\w+",
+                chunk_text.lower()
+            )
+        )
+
+        overlap = query_words.intersection(
+            chunk_words
+        )
+
+        return len(overlap)
+
+    filtered_results.sort(
+        key=lambda result: (
+            keyword_score(
+                result.DocumentChunk.chunk_text
+            ),
+            -result.distance
+        ),
+        reverse=True
+    )
+
+    filtered_results = filtered_results[:3]
+
     print("\n--- RETRIEVAL RESULTS ---")
 
     for result in filtered_results:
-
         print(
             f"""
-Document: {result.DocumentChunk.document.title}
+    Document: {result.DocumentChunk.document.title}
 
-Distance: {result.distance}
+    Distance: {result.distance}
 
-Chunk Preview:
-{result.DocumentChunk.chunk_text[:200]}
-"""
+    Keyword Score:
+    {keyword_score(result.DocumentChunk.chunk_text)}
+
+    Chunk Preview:
+    {result.DocumentChunk.chunk_text[:200]}
+    """
         )
 
     print("--- END RETRIEVAL RESULTS ---\n")
 
     if not filtered_results:
+        def no_result_stream():
+            yield "I could not find relevant information in the uploaded documents."
 
-        return {
-            "question": request.query,
-            "answer": "I could not find relevant information in the uploaded documents.",
-            "sources": []
-        }
+        return StreamingResponse(
+            no_result_stream(),
+            media_type="text/plain"
+        )
 
     context = "\n\n".join(
         [
             result.DocumentChunk.chunk_text
             for result in filtered_results
         ]
-    )
-
-    llm_response = generate_answer(
-        context=context,
-        question=request.query
     )
 
     unique_sources = {}
@@ -200,18 +254,21 @@ Chunk Preview:
                 "document_title": result.DocumentChunk.document.title
             }
 
-    return {
+    return StreamingResponse(
 
-        "question": request.query,
-
-        "answer": (
-            llm_response["answer"]
-            if llm_response["success"]
-            else "LLM service is currently unavailable, but relevant documents were found."
+        stream_answer(
+            context=context,
+            question=request.query
         ),
 
-        "sources": list(unique_sources.values())
-    }
+        media_type="text/plain",
+
+        headers={
+            "X-Sources": json.dumps(
+                list(unique_sources.values())
+            )
+        }
+    )
 
 @app.get("/documents/{document_id}")
 def get_document(document_id: str):

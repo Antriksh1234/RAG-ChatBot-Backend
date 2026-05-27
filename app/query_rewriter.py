@@ -13,7 +13,8 @@ client = Groq(
 
 def rewrite_query(
     history: list,
-    current_question: str
+    current_question: str,
+    summary: str = ""
 ):
 
     if not history:
@@ -37,6 +38,9 @@ Rules:
 - Do not explain anything.
 - Preserve the original meaning.
 - If the latest question is already standalone, return it unchanged.
+
+Conversation Summary:
+{summary}
 
 Conversation History:
 {formatted_history}
