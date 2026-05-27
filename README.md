@@ -62,6 +62,36 @@ Implemented concepts include:
 
 ---
 
+# 🗄️ PostgreSQL + pgvector Setup
+
+This project uses PostgreSQL with the `pgvector` extension for vector similarity search.
+
+You can run PostgreSQL in multiple ways:
+
+- Local PostgreSQL installation
+- Docker
+- Hosted PostgreSQL providers (Neon, Supabase, Railway, etc.)
+
+---
+
+## Enable pgvector Extension
+
+Run the following SQL:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+---
+
+## Example Database URL
+
+```env
+DATABASE_URL=postgresql://username:password@localhost:5432/pandu_workspace
+```
+
+---
+
 # 🏗️ Architecture
 
 
