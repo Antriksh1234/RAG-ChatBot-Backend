@@ -7,6 +7,7 @@ from app.db import engine, SessionLocal
 from app.embeddings import generate_embedding
 from app.schemas import DocumentCreate, SearchRequest, DocumentUpdate
 from app.llm import generate_answer
+from app.query_rewriter import rewrite_query
 
 from app.models import Document, DocumentChunk, Base
 from app.utils import chunk_text
@@ -86,7 +87,18 @@ def semantic_search(request: SearchRequest):
 
     db: Session = SessionLocal()
 
-    query_embedding = generate_embedding(request.query)
+    rewritten_query = rewrite_query(
+        history=[
+            {
+                "role": message.role,
+                "content": message.content
+            }
+            for message in request.history
+        ],
+        current_question=request.query
+    )
+
+    query_embedding = generate_embedding(rewritten_query)
 
     results = db.query(DocumentChunk).order_by(
         DocumentChunk.embedding.cosine_distance(query_embedding)
@@ -105,7 +117,23 @@ def chat(request: SearchRequest):
 
     db: Session = SessionLocal()
 
-    query_embedding = generate_embedding(request.query)
+    rewritten_query = rewrite_query(
+        history=[
+            {
+                "role": message.role,
+                "content": message.content
+            }
+            for message in request.history
+        ],
+        current_question=request.query
+    )
+
+    query_embedding = generate_embedding(rewritten_query)
+
+    print("\n--- QUERY DEBUG ---")
+    print("Original Query:", request.query)
+    print("Rewritten Query:", rewritten_query)
+    print("--- END QUERY DEBUG ---\n")
 
     results = db.query(
         DocumentChunk,

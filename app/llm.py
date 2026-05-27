@@ -1,50 +1,61 @@
-import requests
+from groq import Groq
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+client = Groq(
+    api_key=os.getenv("GROQ_API_KEY")
+)
 
 def generate_answer(context: str, question: str):
+
     prompt = f"""
-    You are a precise AI assistant.
+You are a precise AI assistant.
 
-    Answer ONLY using the provided context.
+Answer ONLY using the provided context.
 
-    Do not make up information.
-    Do not calculate ages unless explicitly stated in the context.
-    Do not modify dates or names.
-    If information is not clearly available, say so.
+Do not make up information.
+Do not infer information beyond the exact context.
+Do not modify dates, names, or numbers.
 
-    Keep answers concise and factual.
+If information is not clearly available, say so.
 
-    Context:
-    {context}
+Keep answers concise and factual.
 
-    Question:
-    {question}
-    """
+Context:
+{context}
+
+Question:
+{question}
+"""
 
     try:
 
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "phi3",
-                "prompt": prompt,
-                "stream": False
-            },
-            timeout=60
+        response = client.chat.completions.create(
+
+            model="llama-3.3-70b-versatile",
+
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+
+            temperature=0
         )
 
-        data = response.json()
+        answer = response.choices[0].message.content
 
         return {
             "success": True,
-            "answer": data["response"]
+            "answer": answer
         }
 
     except Exception as e:
 
-        print("LLM ERROR:", str(e))
+        print("GROQ LLM ERROR:", str(e))
 
         return {
             "success": False,

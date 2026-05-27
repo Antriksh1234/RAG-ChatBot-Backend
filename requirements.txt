@@ -7,3 +7,4 @@ sentence-transformers
 python-dotenv~=1.2.2
 pydantic~=2.13.4
 requests
+groq
